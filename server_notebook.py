@@ -1,176 +1,194 @@
 """
-GOOGLE COLAB NOTEBOOK - Ready to Copy & Paste
-Construction Site Segmentation with Google Drive
+SERVER TRAINING NOTEBOOK - ZIP File Input, Local Output
+Construction Site Segmentation
+
+This is the Colab notebook modified for college server deployment.
+Instead of reading from Google Drive, it reads ZIP files uploaded to the server.
 
 Instructions:
-1. Go to colab.research.google.com
-2. Create new notebook
-3. Copy each section below into separate cells
-4. Run cells in order
-5. Follow prompts (Drive authentication, etc.)
+1. Upload original_images.zip to server
+2. Upload mask_images.zip to server
+3. Run this script with: python server_notebook.py
+   OR copy cells to Jupyter notebook and run sequentially
 """
 
 # ============================================================================
-# CELL 1: Mount Google Drive
+# CELL 1: Import Libraries and Setup Paths
 # ============================================================================
-"""
-In Colab: Copy this entire cell and run it
-"""
-
-from google.colab import drive
-import os
-
-# Mount Drive
-drive.mount('/content/drive')
-print("✓ Google Drive mounted successfully!")
-
-# ============================================================================
-# CELL 2: Configure Paths and Verify Data
-# ============================================================================
-"""
-Update DRIVE_BASE if your folder structure is different
-"""
-
-# UPDATE THIS TO YOUR FOLDER NAME
-DRIVE_BASE = '/content/drive/My Drive/MyProject'
-
-# Data paths
-ORIGINAL_IMAGES_DIR = f'{DRIVE_BASE}/data/original'
-MASK_IMAGES_DIR = f'{DRIVE_BASE}/data/masks'
-PROCESSED_DATA_DIR = f'{DRIVE_BASE}/data/processed'
-MODELS_DIR = f'{DRIVE_BASE}/models'
-MODEL_SAVE_PATH = f'{MODELS_DIR}/construction_site_segmentation.h5'
-
-# Create directories
-os.makedirs(MODELS_DIR, exist_ok=True)
-os.makedirs(PROCESSED_DATA_DIR, exist_ok=True)
-
-# Verify data exists
-print("\n" + "="*60)
-print("VERIFYING DATA")
-print("="*60)
-
-if os.path.exists(ORIGINAL_IMAGES_DIR):
-    orig_count = len(os.listdir(ORIGINAL_IMAGES_DIR))
-    print(f"✓ Original images: {orig_count}")
-else:
-    print(f"✗ Original images directory not found: {ORIGINAL_IMAGES_DIR}")
-    print("  Create this folder in Drive and upload your images")
-
-if os.path.exists(MASK_IMAGES_DIR):
-    mask_count = len(os.listdir(MASK_IMAGES_DIR))
-    print(f"✓ Mask images: {mask_count}")
-else:
-    print(f"✗ Mask images directory not found: {MASK_IMAGES_DIR}")
-    print("  Create this folder in Drive and upload your masks")
-
-print(f"\nPaths configured:")
-print(f"  Original: {ORIGINAL_IMAGES_DIR}")
-print(f"  Masks: {MASK_IMAGES_DIR}")
-print(f"  Processed: {PROCESSED_DATA_DIR}")
-print(f"  Model: {MODEL_SAVE_PATH}")
-
-# ============================================================================
-# CELL 3: Install Dependencies
-# ============================================================================
-"""
-This may take 2-3 minutes
-"""
-
-print("Installing dependencies...")
-!pip install -q tensorflow keras numpy opencv-python albumentations scikit-learn matplotlib tqdm
-
-print("✓ All dependencies installed!")
-print("\nTensorFlow version:", __import__('tensorflow').__version__)
-
-# ============================================================================
-# CELL 4: Define DatasetPreprocessor Class
-# ============================================================================
-"""
-IMPORTANT: Copy the ENTIRE content of preprocess_pipeline.py here
-This is a simplified version - copy the full file for best results
-"""
 
 import os
+import sys
 import cv2
 import numpy as np
 import json
+import zipfile
+import tempfile
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 import albumentations as A
 from tqdm import tqdm
+import warnings
+warnings.filterwarnings('ignore')
 
-class DatasetPreprocessor:
-    """Comprehensive preprocessing pipeline for construction site dataset."""
+print("✓ Libraries imported successfully!")
+
+# ============================================================================
+# CELL 2: Configure ZIP File Paths and Output Directory
+# ============================================================================
+
+"""
+CONFIGURE THESE PATHS BASED ON YOUR SERVER SETUP
+"""
+
+# Input ZIP files (upload these to your server)
+ORIGINAL_IMAGES_ZIP = "./data/input/original_images.zip"  # Your aerial images ZIP
+MASKS_ZIP = "./data/input/mask_images.zip"                 # Your masks ZIP
+
+# Output directory (all results will be saved here)
+OUTPUT_DIR = "./segmentation_results"
+
+# Create output directory if it doesn't exist
+Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+
+print("\n" + "="*70)
+print("CONFIGURATION")
+print("="*70)
+print(f"Input ZIP files:")
+print(f"  Original: {os.path.abspath(ORIGINAL_IMAGES_ZIP)}")
+print(f"  Masks:    {os.path.abspath(MASKS_ZIP)}")
+print(f"Output directory: {os.path.abspath(OUTPUT_DIR)}")
+
+# Check if ZIP files exist
+if not os.path.exists(ORIGINAL_IMAGES_ZIP):
+    print(f"\n✗ ERROR: {ORIGINAL_IMAGES_ZIP} not found!")
+    print("  Please upload original_images.zip to ./data/input/")
+    sys.exit(1)
+
+if not os.path.exists(MASKS_ZIP):
+    print(f"\n✗ ERROR: {MASKS_ZIP} not found!")
+    print("  Please upload mask_images.zip to ./data/input/")
+    sys.exit(1)
+
+print(f"\n✓ ZIP files found!")
+
+# ============================================================================
+# CELL 3: Define ServerDatasetPreprocessor Class
+# ============================================================================
+
+class ServerDatasetPreprocessor:
+    """Preprocessing pipeline that reads from ZIP files."""
     
-    def __init__(self, original_images_dir, mask_images_dir, output_dir, 
-                 target_size=(512, 512), seed=42):
-        self.original_dir = Path(original_images_dir)
-        self.mask_dir = Path(mask_images_dir)
+    def __init__(self, original_zip, masks_zip, output_dir, target_size=(512, 512), seed=42):
+        self.original_zip = Path(original_zip)
+        self.masks_zip = Path(masks_zip)
         self.output_dir = Path(output_dir)
         self.target_size = target_size
         self.seed = seed
         np.random.seed(seed)
         
+        # Temporary directories for extraction
+        self.temp_original = None
+        self.temp_masks = None
+        
+        # Create output structure
         self.create_output_structure()
+        
         self.stats = {
             'total_images': 0,
             'valid_pairs': 0,
             'invalid_pairs': [],
-            'preprocessing_log': []
         }
     
     def create_output_structure(self):
-        """Create organized directory structure."""
+        """Create organized output directory structure."""
         splits = ['train', 'val', 'test']
+        
         for split in splits:
             (self.output_dir / split / 'images').mkdir(parents=True, exist_ok=True)
             (self.output_dir / split / 'masks').mkdir(parents=True, exist_ok=True)
+        
         (self.output_dir / 'metadata').mkdir(parents=True, exist_ok=True)
+        print(f"✓ Output structure created: {self.output_dir}")
+    
+    def extract_zips(self):
+        """Extract ZIP files to temporary directories."""
+        print("\n" + "="*60)
+        print("EXTRACTING ZIP FILES")
+        print("="*60)
+        
+        # Create temporary directories
+        self.temp_original = Path(tempfile.mkdtemp(prefix="original_"))
+        self.temp_masks = Path(tempfile.mkdtemp(prefix="masks_"))
+        
+        print(f"Extracting original images...")
+        with zipfile.ZipFile(self.original_zip, 'r') as zip_ref:
+            zip_ref.extractall(self.temp_original)
+        print(f"✓ Extracted to {self.temp_original}")
+        
+        print(f"\nExtracting mask images...")
+        with zipfile.ZipFile(self.masks_zip, 'r') as zip_ref:
+            zip_ref.extractall(self.temp_masks)
+        print(f"✓ Extracted to {self.temp_masks}")
     
     def find_image_pairs(self):
-        """Find matching original-mask pairs."""
-        original_images = set(f.stem for f in self.original_dir.glob('*') 
-                            if f.suffix.lower() in ['.png', '.jpg', '.jpeg'])
-        mask_images = set(f.stem for f in self.mask_dir.glob('*') 
-                         if f.suffix.lower() in ['.png', '.jpg', '.jpeg'])
+        """Find matching original-mask pairs from extracted directories."""
+        print("\n" + "="*60)
+        print("FINDING IMAGE-MASK PAIRS")
+        print("="*60)
         
-        matched_pairs = original_images & mask_images
+        original_images = {}
+        mask_images = {}
+        
+        # Find all image files recursively
+        for file in self.temp_original.rglob('*'):
+            if file.suffix.lower() in ['.png', '.jpg', '.jpeg'] and file.is_file():
+                original_images[file.stem] = file
+        
+        for file in self.temp_masks.rglob('*'):
+            if file.suffix.lower() in ['.png', '.jpg', '.jpeg'] and file.is_file():
+                mask_images[file.stem] = file
+        
+        # Find matching pairs
+        matched_pairs = {}
+        for stem in original_images.keys():
+            if stem in mask_images:
+                matched_pairs[stem] = (original_images[stem], mask_images[stem])
+        
         self.stats['total_images'] = len(matched_pairs)
         
-        print(f"✓ Found {len(matched_pairs)} matching image-mask pairs")
-        return list(matched_pairs)
+        print(f"✓ Original images found: {len(original_images)}")
+        print(f"✓ Mask images found: {len(mask_images)}")
+        print(f"✓ Matched pairs: {len(matched_pairs)}")
+        
+        return matched_pairs
     
-    def load_and_validate_pair(self, image_stem):
+    def load_and_validate_pair(self, stem, original_path, mask_path):
         """Load and validate image-mask pair."""
-        original_file = list(self.original_dir.glob(f'{image_stem}.*'))
-        mask_file = list(self.mask_dir.glob(f'{image_stem}.*'))
-        
-        if not original_file or not mask_file:
-            self.stats['invalid_pairs'].append(image_stem)
-            return None, None, False
-        
         try:
-            image = cv2.imread(str(original_file[0]))
-            mask = cv2.imread(str(mask_file[0]), cv2.IMREAD_GRAYSCALE)
+            image = cv2.imread(str(original_path))
+            mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
             
             if image is None or mask is None:
+                self.stats['invalid_pairs'].append(f"{stem}: Could not read")
                 return None, None, False
             
             if image.shape[:2] != mask.shape:
+                self.stats['invalid_pairs'].append(f"{stem}: Shape mismatch")
                 return None, None, False
             
             self.stats['valid_pairs'] += 1
             return image, mask, True
-        except:
+            
+        except Exception as e:
+            self.stats['invalid_pairs'].append(f"{stem}: {str(e)}")
             return None, None, False
     
     def normalize_image(self, image):
-        """Normalize image to [0, 1]."""
+        """Normalize image to [0, 1] range."""
         return image.astype(np.float32) / 255.0
     
     def normalize_mask(self, mask):
-        """Normalize mask to binary."""
+        """Normalize mask to binary [0, 1]."""
         _, mask_binary = cv2.threshold(mask, 127, 1, cv2.THRESH_BINARY)
         return mask_binary.astype(np.float32)
     
@@ -182,7 +200,7 @@ class DatasetPreprocessor:
         return image_resized, mask_resized
     
     def create_augmentation_pipeline(self, augment=True):
-        """Create augmentation pipeline."""
+        """Create data augmentation pipeline."""
         if not augment:
             return A.Compose([
                 A.Normalize(mean=[0.485, 0.456, 0.406], 
@@ -199,7 +217,8 @@ class DatasetPreprocessor:
             A.RandomRain(p=0.1),
             A.RandomFog(p=0.1),
             A.GaussBlur(blur_limit=3, p=0.2),
-            A.Cutout(num_holes=4, max_h_size=30, max_w_size=30, p=0.2),
+            # FIXED: Using CoarseDropout instead of Cutout
+            A.CoarseDropout(max_holes=4, max_height=30, max_width=30, p=0.2),
             A.Normalize(mean=[0.485, 0.456, 0.406], 
                        std=[0.229, 0.224, 0.225]),
         ], is_check_shapes=False)
@@ -210,18 +229,26 @@ class DatasetPreprocessor:
         print("PREPROCESSING DATASET")
         print("="*60)
         
-        # Find pairs
-        pairs = self.find_image_pairs()
+        # Extract ZIPs
+        self.extract_zips()
         
-        # Split
+        # Find pairs
+        print("\n[Step 1/4] Finding matching pairs...")
+        pairs = self.find_image_pairs()
+        pair_list = list(pairs.keys())
+        
+        # Split dataset
+        print("\n[Step 2/4] Splitting dataset...")
         train_pairs, temp = train_test_split(
-            pairs, test_size=(val_size + test_size), random_state=self.seed
+            pair_list, test_size=(val_size + test_size), random_state=self.seed
         )
         val_pairs, test_pairs = train_test_split(
             temp, test_size=(test_size / (val_size + test_size)), random_state=self.seed
         )
         
-        print(f"  Train: {len(train_pairs)} | Val: {len(val_pairs)} | Test: {len(test_pairs)}")
+        print(f"  Train: {len(train_pairs)} ({len(train_pairs)/len(pair_list)*100:.1f}%)")
+        print(f"  Val:   {len(val_pairs)} ({len(val_pairs)/len(pair_list)*100:.1f}%)")
+        print(f"  Test:  {len(test_pairs)} ({len(test_pairs)/len(pair_list)*100:.1f}%)")
         
         # Process splits
         split_data = {
@@ -232,26 +259,33 @@ class DatasetPreprocessor:
         
         all_metadata = {'train': {}, 'val': {}, 'test': {}}
         
-        for split_name, (split_pairs, do_augment) in split_data.items():
+        print("\n[Step 3/4] Processing images...")
+        for split_idx, (split_name, (split_pair_list, do_augment)) in enumerate(split_data.items(), 1):
+            print(f"\n[Step 3.{split_idx}/3] Processing {split_name.upper()} split...")
+            
             augmentation = self.create_augmentation_pipeline(
                 augment=(do_augment and augment_training)
             )
             
             processed_count = 0
-            for image_stem in tqdm(split_pairs, desc=f"Processing {split_name}"):
-                image, mask, valid = self.load_and_validate_pair(image_stem)
+            for image_stem in tqdm(split_pair_list, desc=f"Processing {split_name}"):
+                orig_path, mask_path = pairs[image_stem]
+                image, mask, valid = self.load_and_validate_pair(image_stem, orig_path, mask_path)
                 
                 if not valid:
                     continue
                 
+                # Preprocess
                 image = self.normalize_image(image)
                 mask = self.normalize_mask(mask)
                 image, mask = self.resize_image_and_mask(image, mask)
                 
+                # Augment
                 augmented = augmentation(image=image, mask=mask)
                 image_aug = augmented['image']
                 mask_aug = augmented['mask']
                 
+                # Save locally
                 split_dir = self.output_dir / split_name
                 image_path = split_dir / 'images' / f'{image_stem}.npy'
                 mask_path = split_dir / 'masks' / f'{image_stem}.npy'
@@ -259,6 +293,7 @@ class DatasetPreprocessor:
                 np.save(image_path, image_aug.astype(np.float32))
                 np.save(mask_path, mask_aug.astype(np.float32))
                 
+                # Store metadata
                 all_metadata[split_name][image_stem] = {
                     'original_shape': image.shape,
                     'processed_shape': image_aug.shape,
@@ -271,15 +306,42 @@ class DatasetPreprocessor:
             print(f"  ✓ {processed_count} images processed for {split_name}")
         
         # Save metadata
+        print("\n[Step 4/4] Saving metadata...")
         metadata_file = self.output_dir / 'metadata' / 'dataset_info.json'
         with open(metadata_file, 'w') as f:
             json.dump(all_metadata, f, indent=2)
         
-        print(f"\n✓ Preprocessing complete!")
-        print(f"  Valid pairs: {self.stats['valid_pairs']}")
-        print(f"  Output: {self.output_dir}")
+        # Print summary
+        self.print_summary()
+        
+        # Cleanup temp files
+        self.cleanup_temp()
         
         return all_metadata
+    
+    def print_summary(self):
+        """Print preprocessing summary."""
+        print("\n" + "="*60)
+        print("PREPROCESSING SUMMARY")
+        print("="*60)
+        print(f"✓ Total images found: {self.stats['total_images']}")
+        print(f"✓ Valid pairs: {self.stats['valid_pairs']}")
+        print(f"✗ Invalid pairs: {len(self.stats['invalid_pairs'])}")
+        print(f"✓ Output directory: {self.output_dir}")
+        print("="*60)
+    
+    def cleanup_temp(self):
+        """Clean up temporary directories."""
+        import shutil
+        try:
+            if self.temp_original and self.temp_original.exists():
+                shutil.rmtree(self.temp_original)
+            if self.temp_masks and self.temp_masks.exists():
+                shutil.rmtree(self.temp_masks)
+            print("✓ Temporary files cleaned up")
+        except Exception as e:
+            print(f"Warning: Could not clean up temp files: {e}")
+
 
 class DataLoader:
     """Load preprocessed dataset."""
@@ -295,9 +357,14 @@ class DataLoader:
         split_dir = self.dataset_dir / split
         image_files = sorted((split_dir / 'images').glob('*.npy'))
         
+        if not image_files:
+            raise ValueError(f"No images found in {split} split!")
+        
+        print(f"Loading {len(image_files)} {split} samples...")
+        
         def load_image_mask(image_path):
-            image = np.load(image_path.numpy().decode('utf-8'))
-            mask_path = image_path.numpy().decode('utf-8').replace('/images/', '/masks/')
+            image = np.load(image_path)
+            mask_path = str(image_path).replace('/images/', '/masks/')
             mask = np.load(mask_path)
             return image, mask
         
@@ -315,15 +382,12 @@ class DataLoader:
         
         return dataset
 
-print("✓ DatasetPreprocessor and DataLoader classes loaded!")
+
+print("✓ Preprocessor classes defined!")
 
 # ============================================================================
-# CELL 5: Define U-Net Model Class
+# CELL 4: Define U-Net Model Classes
 # ============================================================================
-"""
-IMPORTANT: Copy the ENTIRE content of keras_model.py here
-This is a simplified version - copy the full file for best results
-"""
 
 import tensorflow as tf
 from tensorflow import keras
@@ -339,46 +403,46 @@ class UNetSegmentation(models.Model):
         self.filters_base = filters_base
         
         # Encoder
-        self.conv1 = self.conv_block(filters_base, name='conv1')
+        self.conv1 = self.conv_block(filters_base)
         self.pool1 = layers.MaxPooling2D(pool_size=2, strides=2, padding='same')
         
-        self.conv2 = self.conv_block(filters_base * 2, name='conv2')
+        self.conv2 = self.conv_block(filters_base * 2)
         self.pool2 = layers.MaxPooling2D(pool_size=2, strides=2, padding='same')
         
-        self.conv3 = self.conv_block(filters_base * 4, name='conv3')
+        self.conv3 = self.conv_block(filters_base * 4)
         self.pool3 = layers.MaxPooling2D(pool_size=2, strides=2, padding='same')
         
-        self.conv4 = self.conv_block(filters_base * 8, name='conv4')
+        self.conv4 = self.conv_block(filters_base * 8)
         self.pool4 = layers.MaxPooling2D(pool_size=2, strides=2, padding='same')
         
         # Bottleneck
-        self.conv5 = self.conv_block(filters_base * 16, name='conv5')
+        self.conv5 = self.conv_block(filters_base * 16)
         
         # Decoder
         self.upconv4 = layers.Conv2DTranspose(filters_base * 8, 3, strides=2, padding='same', activation='relu')
-        self.conv6 = self.conv_block(filters_base * 8, name='conv6')
+        self.conv6 = self.conv_block(filters_base * 8)
         
         self.upconv3 = layers.Conv2DTranspose(filters_base * 4, 3, strides=2, padding='same', activation='relu')
-        self.conv7 = self.conv_block(filters_base * 4, name='conv7')
+        self.conv7 = self.conv_block(filters_base * 4)
         
         self.upconv2 = layers.Conv2DTranspose(filters_base * 2, 3, strides=2, padding='same', activation='relu')
-        self.conv8 = self.conv_block(filters_base * 2, name='conv8')
+        self.conv8 = self.conv_block(filters_base * 2)
         
         self.upconv1 = layers.Conv2DTranspose(filters_base, 3, strides=2, padding='same', activation='relu')
-        self.conv9 = self.conv_block(filters_base, name='conv9')
+        self.conv9 = self.conv_block(filters_base)
         
         # Output
         self.output_conv = layers.Conv2D(num_classes, 1, padding='same', activation='sigmoid')
     
-    def conv_block(self, filters, name):
+    def conv_block(self, filters):
         """Convolutional block."""
         return models.Sequential([
-            layers.Conv2D(filters, 3, padding='same', activation='relu', name=f'{name}_conv1'),
-            layers.BatchNormalization(name=f'{name}_bn1'),
+            layers.Conv2D(filters, 3, padding='same', activation='relu'),
+            layers.BatchNormalization(),
             layers.Dropout(0.2),
-            layers.Conv2D(filters, 3, padding='same', activation='relu', name=f'{name}_conv2'),
-            layers.BatchNormalization(name=f'{name}_bn2'),
-        ], name=name)
+            layers.Conv2D(filters, 3, padding='same', activation='relu'),
+            layers.BatchNormalization(),
+        ])
     
     def call(self, inputs, training=False):
         """Forward pass."""
@@ -414,6 +478,7 @@ class UNetSegmentation(models.Model):
         
         output = self.output_conv(c9)
         return output
+
 
 class SegmentationModel:
     """High-level segmentation model API."""
@@ -469,24 +534,6 @@ class SegmentationModel:
         )
         return self.history
     
-    def predict_mask(self, image):
-        """Predict mask."""
-        image_batch = np.expand_dims(image, axis=0)
-        prediction = self.model.predict(image_batch, verbose=0)
-        mask = np.squeeze(prediction, axis=0)
-        mask = (mask > 0.5).astype(np.uint8) * 255
-        return mask
-    
-    def save(self, filepath):
-        """Save model."""
-        self.model.save(filepath)
-        print(f"✓ Model saved to {filepath}")
-    
-    def load(self, filepath):
-        """Load model."""
-        self.model = keras.models.load_model(filepath)
-        print(f"✓ Model loaded from {filepath}")
-    
     def evaluate(self, test_dataset):
         """Evaluate model."""
         results = self.model.evaluate(test_dataset, verbose=0)
@@ -500,24 +547,27 @@ class SegmentationModel:
         print(f"Recall:    {results[4]:.4f}")
         print("="*60)
         return results
+    
+    def save(self, filepath):
+        """Save model."""
+        self.model.save(filepath)
+        print(f"✓ Model saved to {filepath}")
 
-print("✓ U-Net model classes loaded!")
+
+print("✓ Model classes defined!")
 
 # ============================================================================
-# CELL 6: Preprocess Dataset
+# CELL 5: Preprocess Dataset from ZIP
 # ============================================================================
-"""
-This will take 30 minutes to 1 hour depending on image sizes
-"""
 
 print("\n" + "="*70)
-print("PREPROCESSING DATASET FROM GOOGLE DRIVE")
+print("STARTING PREPROCESSING")
 print("="*70)
 
-preprocessor = DatasetPreprocessor(
-    original_images_dir=ORIGINAL_IMAGES_DIR,
-    mask_images_dir=MASK_IMAGES_DIR,
-    output_dir=PROCESSED_DATA_DIR,
+preprocessor = ServerDatasetPreprocessor(
+    original_zip=ORIGINAL_IMAGES_ZIP,
+    masks_zip=MASKS_ZIP,
+    output_dir=OUTPUT_DIR,
     target_size=(512, 512),
     seed=42
 )
@@ -529,18 +579,16 @@ metadata = preprocessor.process_dataset(
 )
 
 print("\n✓ Preprocessing complete!")
-print("  Processed data saved to Google Drive")
 
 # ============================================================================
-# CELL 7: Load Data for Training
+# CELL 6: Load Data for Training
 # ============================================================================
-"""
-This loads the preprocessed data into TensorFlow datasets
-"""
 
-print("\nLoading datasets for training...")
+print("\n" + "="*70)
+print("LOADING DATASETS")
+print("="*70)
 
-data_loader = DataLoader(dataset_dir=PROCESSED_DATA_DIR, batch_size=32)
+data_loader = DataLoader(dataset_dir=OUTPUT_DIR, batch_size=32)
 
 train_dataset = data_loader.create_tf_dataset(split='train', shuffle=True)
 val_dataset = data_loader.create_tf_dataset(split='val', shuffle=False)
@@ -549,11 +597,8 @@ test_dataset = data_loader.create_tf_dataset(split='test', shuffle=False)
 print("✓ Datasets loaded successfully!")
 
 # ============================================================================
-# CELL 8: Build and Compile Model
+# CELL 7: Build and Compile Model
 # ============================================================================
-"""
-Creates the U-Net model architecture
-"""
 
 print("\n" + "="*70)
 print("BUILDING MODEL")
@@ -564,18 +609,14 @@ model.build(filters_base=32)
 model.compile(learning_rate=0.001)
 
 # ============================================================================
-# CELL 9: Train Model
+# CELL 8: Train Model
 # ============================================================================
-"""
-Training will take 2-3 hours on GPU
-Monitor the metrics - they should improve steadily
-"""
 
 print("\n" + "="*70)
 print("TRAINING MODEL")
 print("="*70)
-print("This will take 2-3 hours on GPU...")
-print()
+print("Training for 50 epochs...")
+print("(Check segmentation_results/logs/ for training history)\n")
 
 history = model.train(
     train_dataset=train_dataset,
@@ -586,11 +627,8 @@ history = model.train(
 print("\n✓ Training complete!")
 
 # ============================================================================
-# CELL 10: Evaluate on Test Set
+# CELL 9: Evaluate on Test Set
 # ============================================================================
-"""
-Evaluate model performance on unseen test data
-"""
 
 print("\n" + "="*70)
 print("EVALUATING MODEL")
@@ -599,118 +637,46 @@ print("="*70)
 model.evaluate(test_dataset)
 
 # ============================================================================
-# CELL 11: Save Model to Google Drive
+# CELL 10: Save Model Locally
 # ============================================================================
-"""
-Model is automatically saved to Google Drive
-"""
 
 print("\n" + "="*70)
 print("SAVING MODEL")
 print("="*70)
 
-model.save(MODEL_SAVE_PATH)
+model_path = f'{OUTPUT_DIR}/models/construction_site_segmentation.h5'
+Path(f'{OUTPUT_DIR}/models').mkdir(parents=True, exist_ok=True)
+model.save(model_path)
+
+# Save training history
+history_dict = {
+    'loss': [float(x) for x in history.history.get('loss', [])],
+    'val_loss': [float(x) for x in history.history.get('val_loss', [])],
+    'accuracy': [float(x) for x in history.history.get('accuracy', [])],
+    'val_accuracy': [float(x) for x in history.history.get('val_accuracy', [])],
+    'iou': [float(x) for x in history.history.get('iou', [])],
+    'val_iou': [float(x) for x in history.history.get('val_iou', [])],
+}
+
+Path(f'{OUTPUT_DIR}/logs').mkdir(parents=True, exist_ok=True)
+history_path = f'{OUTPUT_DIR}/logs/training_history.json'
+with open(history_path, 'w') as f:
+    json.dump(history_dict, f, indent=2)
 
 print(f"\n✓ SUCCESS!")
-print(f"  Model saved to: {MODEL_SAVE_PATH}")
-print(f"\n  You can now:")
-print(f"  1. Download the model from Google Drive")
-print(f"  2. Use it for inference on new images")
-print(f"  3. Share it with collaborators")
-
-# ============================================================================
-# CELL 12 (Optional): Plot Training History
-# ============================================================================
-"""
-Visualize how the model improved during training
-"""
-
-import matplotlib.pyplot as plt
-
-fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-
-# Loss
-axes[0, 0].plot(history.history['loss'], label='Train Loss')
-axes[0, 0].plot(history.history['val_loss'], label='Val Loss')
-axes[0, 0].set_title('Loss', fontsize=14, fontweight='bold')
-axes[0, 0].set_xlabel('Epoch')
-axes[0, 0].legend()
-axes[0, 0].grid(True, alpha=0.3)
-
-# Accuracy
-axes[0, 1].plot(history.history['accuracy'], label='Train')
-axes[0, 1].plot(history.history['val_accuracy'], label='Val')
-axes[0, 1].set_title('Accuracy', fontsize=14, fontweight='bold')
-axes[0, 1].set_xlabel('Epoch')
-axes[0, 1].legend()
-axes[0, 1].grid(True, alpha=0.3)
-
-# IoU
-axes[1, 0].plot(history.history['iou'], label='Train')
-axes[1, 0].plot(history.history['val_iou'], label='Val')
-axes[1, 0].set_title('IoU (Intersection over Union)', fontsize=14, fontweight='bold')
-axes[1, 0].set_xlabel('Epoch')
-axes[1, 0].legend()
-axes[1, 0].grid(True, alpha=0.3)
-
-# Precision & Recall
-axes[1, 1].plot(history.history['precision'], label='Precision')
-axes[1, 1].plot(history.history['recall'], label='Recall')
-axes[1, 1].set_title('Precision & Recall', fontsize=14, fontweight='bold')
-axes[1, 1].set_xlabel('Epoch')
-axes[1, 1].legend()
-axes[1, 1].grid(True, alpha=0.3)
-
-plt.tight_layout()
-plt.savefig(f'{MODELS_DIR}/training_history.png', dpi=150, bbox_inches='tight')
-print(f"✓ Training history plot saved to {MODELS_DIR}/training_history.png")
-plt.show()
-
-# ============================================================================
-# CELL 13 (Optional): Make Predictions on Test Images
-# ============================================================================
-"""
-Use the trained model to make predictions on test images
-"""
-
-# Make predictions on first test image
-print("\nMaking predictions on test set...")
-
-# Get a batch from test dataset
-for images, masks in test_dataset.take(1):
-    # Make predictions
-    predictions = model.model.predict(images[:4], verbose=0)
-    
-    # Visualize
-    fig, axes = plt.subplots(4, 3, figsize=(12, 12))
-    
-    for i in range(4):
-        # Original image
-        axes[i, 0].imshow((images[i].numpy() * 255).astype(np.uint8))
-        axes[i, 0].set_title(f'Image {i+1}')
-        axes[i, 0].axis('off')
-        
-        # Ground truth mask
-        axes[i, 1].imshow(masks[i].numpy().squeeze(), cmap='gray')
-        axes[i, 1].set_title(f'Ground Truth')
-        axes[i, 1].axis('off')
-        
-        # Predicted mask
-        axes[i, 2].imshow(predictions[i].squeeze(), cmap='gray')
-        axes[i, 2].set_title(f'Prediction')
-        axes[i, 2].axis('off')
-    
-    plt.tight_layout()
-    plt.savefig(f'{MODELS_DIR}/predictions_sample.png', dpi=100, bbox_inches='tight')
-    print(f"✓ Sample predictions saved")
-    plt.show()
+print(f"\nResults saved to: {os.path.abspath(OUTPUT_DIR)}")
+print(f"\nFiles created:")
+print(f"  Model: {os.path.abspath(model_path)}")
+print(f"  History: {os.path.abspath(history_path)}")
+print(f"  Preprocessed data:")
+print(f"    Train: {os.path.abspath(f'{OUTPUT_DIR}/train')}")
+print(f"    Val:   {os.path.abspath(f'{OUTPUT_DIR}/val')}")
+print(f"    Test:  {os.path.abspath(f'{OUTPUT_DIR}/test')}")
+print(f"\nNext steps:")
+print(f"  1. Download segmentation_results/ folder to your laptop")
+print(f"  2. Use the model for inference on new images")
+print(f"  3. Check training_history.json for training curves")
 
 print("\n" + "="*70)
 print("ALL DONE!")
 print("="*70)
-print(f"\nYour trained model is saved in Google Drive:")
-print(f"  {MODEL_SAVE_PATH}")
-print(f"\nNext steps:")
-print(f"  1. Download the model to your computer")
-print(f"  2. Use it for inference on new images")
-print(f"  3. Fine-tune with more data if needed")

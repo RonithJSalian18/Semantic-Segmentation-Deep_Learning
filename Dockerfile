@@ -1,29 +1,28 @@
-FROM python:3.10-slim
+# Use official TensorFlow image
+FROM tensorflow/tensorflow:2.13.0
 
+# Set working directory
 WORKDIR /app
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+# Prevent Python from writing pyc files
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-# System packages needed for OpenCV and scientific Python stack
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        libglib2.0-0 \
-        libgl1 \
+# Install system dependencies required by OpenCV
+RUN apt-get update && apt-get install -y \
+    python3-pip \
+    libgl1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY . /app
+# Copy requirements file
+COPY requirements.txt .
 
-RUN pip install --upgrade pip \
-    && pip install \
-        tensorflow \
-        keras \
-        numpy \
-        opencv-python-headless \
-        albumentations \
-        scikit-learn \
-        matplotlib \
-        tqdm
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-CMD ["python", "main.py"]
+# Copy project files
+COPY . .
+
+# Default command to run training script
+CMD ["python", "server_notebook.py"]

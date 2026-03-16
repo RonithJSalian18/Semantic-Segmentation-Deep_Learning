@@ -1,54 +1,75 @@
-# Construction Site Segmentation using U-Net
+# Construction Site Segmentation (U-Net)
 
-## Overview
+A deep learning pipeline for **semantic segmentation of construction sites from aerial images** using a **U-Net architecture implemented in TensorFlow**.
 
-This project implements a **semantic segmentation pipeline** for detecting construction sites in aerial imagery using a **U-Net deep learning model** built with TensorFlow.
+The project includes:
 
-The pipeline performs:
-
-* Dataset extraction from ZIP files
-* Image–mask pairing and validation
-* Image preprocessing and normalization
+* Dataset preprocessing from ZIP files
+* Image–mask validation
 * Data augmentation
-* Dataset splitting (Train / Validation / Test)
-* Model training using U-Net
-* Evaluation with segmentation metrics
-* Saving trained models and training logs
+* Automatic dataset splitting
+* U-Net training pipeline
+* Model evaluation
+* Saving trained model and logs
 
-The system is designed to run **locally or on a remote server** and can also be containerized using Docker.
+This script is designed to run on a **local machine, research server, or Docker container**.
+
+---
+
+# Project Workflow
+
+The training pipeline performs the following steps:
+
+1. Load dataset ZIP files
+2. Extract images and masks
+3. Match image–mask pairs
+4. Validate dataset
+5. Normalize images and masks
+6. Resize images to **512 × 512**
+7. Apply data augmentation
+8. Split dataset into:
+
+   * Train
+   * Validation
+   * Test
+9. Train a **U-Net segmentation model**
+10. Evaluate model performance
+11. Save model and training history
 
 ---
 
 # Project Structure
 
+Example repository structure:
+
 ```
-project/
+construction-site-segmentation/
 │
 ├── server_notebook.py
-├── requirements.txt
 ├── README.md
+├── requirements.txt
 │
 ├── data/
 │   └── input/
-│        ├── original_images.zip
-│        └── mask_images.zip
+│       ├── original_images.zip
+│       └── mask_images.zip
 │
 └── segmentation_results/
-     ├── train/
-     ├── val/
-     ├── test/
-     ├── models/
-     ├── logs/
-     └── metadata/
+    ├── train/
+    ├── val/
+    ├── test/
+    ├── metadata/
+    ├── logs/
+    └── models/
 ```
 
 ---
 
 # Dataset Format
 
-The system expects two ZIP files:
+The project expects **two ZIP files**:
 
-### 1. Original Images
+### Original Images
 
 ```
 original_images.zip
@@ -56,7 +77,7 @@ original_images.zip
 
 Contains aerial RGB images.
 
-### 2. Mask Images
+### Mask Images
 
 ```
 mask_images.zip
@@ -64,16 +85,22 @@ mask_images.zip
 
 Contains segmentation masks.
 
-### Important
+Important requirement:
 
-Each mask file must have the **same filename as the corresponding image**.
+Each mask must have **the same filename as its corresponding image**.
 
 Example:
 
 ```
-image_001.png
-image_001.png (mask)
+image001.png
+image001.png (mask)
 ```
+
+Supported formats:
+
+* `.png`
+* `.jpg`
+* `.jpeg`
 
 ---
 
@@ -81,14 +108,14 @@ image_001.png (mask)
 
 Clone the repository:
 
-```bash
+```
 git clone https://github.com/yourusername/construction-site-segmentation.git
 cd construction-site-segmentation
 ```
 
 Install dependencies:
 
-```bash
+```
 pip install -r requirements.txt
 ```
 
@@ -96,7 +123,7 @@ pip install -r requirements.txt
 
 # Required Libraries
 
-The project uses the following libraries:
+Main dependencies:
 
 * TensorFlow
 * NumPy
@@ -106,13 +133,23 @@ The project uses the following libraries:
 * tqdm
 * Pillow
 
-All dependencies are included in `requirements.txt`.
+Example `requirements.txt`:
+
+```
+tensorflow
+numpy
+opencv-python
+albumentations
+scikit-learn
+tqdm
+pillow
+```
 
 ---
 
 # Running the Training Pipeline
 
-Place the dataset ZIP files inside:
+Place dataset ZIP files in:
 
 ```
 data/input/
@@ -120,56 +157,104 @@ data/input/
 
 Then run:
 
-```bash
+```
 python server_notebook.py
 ```
 
 ---
 
-# Processing Pipeline
+# Data Preprocessing
 
-The training script performs the following steps:
+The script automatically performs:
 
-1. Extract dataset ZIP files
-2. Find matching image–mask pairs
-3. Validate dataset
-4. Resize images to **512 × 512**
-5. Normalize images and masks
-6. Apply data augmentation
-7. Split dataset into:
+### Dataset Extraction
 
-   * Train (75%)
-   * Validation (15%)
-   * Test (10%)
-8. Train the **U-Net segmentation model**
-9. Evaluate the model
-10. Save model and logs
+ZIP files are extracted into temporary directories.
+
+### Pair Matching
+
+Images and masks are matched using their filenames.
+
+### Image Normalization
+
+Images are scaled to:
+
+```
+[0,1]
+```
+
+### Mask Normalization
+
+Masks are converted to **binary values**:
+
+```
+0 → background
+1 → construction site
+```
+
+### Resizing
+
+All images are resized to:
+
+```
+512 × 512
+```
+
+### Data Augmentation
+
+The following augmentations are applied:
+
+* Horizontal Flip
+* Vertical Flip
+* Rotation
+* Perspective Transform
+* Gaussian Noise
+* Color Jitter
+* Random Rain
+* Random Fog
+* Gaussian Blur
+* Coarse Dropout
+
+---
+
+# Dataset Splitting
+
+Default dataset split:
+
+| Split      | Percentage |
+| ---------- | ---------- |
+| Train      | 75%        |
+| Validation | 15%        |
+| Test       | 10%        |
 
 ---
 
 # Model Architecture
 
-The project uses a **U-Net convolutional neural network** consisting of:
+The project uses a **U-Net convolutional neural network** for semantic segmentation.
 
-Encoder:
+Architecture components:
+
+Encoder
 
 * Convolution blocks
-* MaxPooling layers
+* Batch normalization
+* Max pooling
 
-Bottleneck:
+Bottleneck
 
 * Deep convolution layers
 
-Decoder:
+Decoder
 
-* Transposed convolutions
+* Transposed convolution
 * Skip connections
 
-Output:
+Output layer
 
-* Sigmoid activation for binary segmentation
+* Sigmoid activation
 
-Input size:
+Input shape:
 
 ```
 512 × 512 × 3
@@ -177,45 +262,43 @@ Input size:
 
 ---
 
-# Training
+# Training Configuration
 
-Default training configuration:
+Default training parameters:
 
-| Parameter  | Value               |
-| ---------- | ------------------- |
-| Epochs     | 50                  |
-| Batch Size | 32                  |
-| Optimizer  | Adam                |
-| Loss       | Binary Crossentropy |
+| Parameter     | Value               |
+| ------------- | ------------------- |
+| Epochs        | 50                  |
+| Batch Size    | 32                  |
+| Optimizer     | Adam                |
+| Learning Rate | 0.001               |
+| Loss Function | Binary Crossentropy |
 
-Metrics:
+Metrics used:
 
 * Accuracy
-* IoU
+* Intersection over Union (IoU)
 * Precision
 * Recall
+
+Training also uses:
+
+* EarlyStopping
+* ReduceLROnPlateau
 
 ---
 
 # Output
 
-After training, results are stored in:
+After training, results are saved in:
 
 ```
 segmentation_results/
 ```
 
-Contents:
+Directory contents:
 
-```
-models/
-construction_site_segmentation.h5
-```
-
-```
-logs/
-training_history.json
-```
+### Processed Dataset
 
 ```
 train/
@@ -223,22 +306,35 @@ val/
 test/
 ```
 
+### Model
+
 ```
-metadata/
-dataset_info.json
+models/construction_site_segmentation.h5
+```
+
+### Training Logs
+
+```
+logs/training_history.json
+```
+
+### Dataset Metadata
+
+```
+metadata/dataset_info.json
 ```
 
 ---
 
-# Evaluation Metrics
+# Example Training Output
 
-The model reports:
-
-* Loss
-* Binary Accuracy
-* Intersection over Union (IoU)
-* Precision
-* Recall
+```
+Loss:      0.2453
+Accuracy:  0.9124
+IoU:       0.7321
+Precision: 0.8845
+Recall:    0.8612
+```
 
 ---
 
@@ -246,13 +342,13 @@ The model reports:
 
 Build the Docker image:
 
-```bash
+```
 docker build -t segmentation-training .
 ```
 
-Run the container:
+Run container:
 
-```bash
+```
 docker run \
 -v /server/data:/app/data/input \
 -v /server/output:/app/segmentation_results \
@@ -261,44 +357,31 @@ segmentation-training
 
 ---
 
-# Download Results
+# Next Steps
 
-After training, download the folder:
+After training:
 
-```
-segmentation_results/
-```
+1. Download the `segmentation_results` folder
+2. Use the trained model for inference
+3. Analyze training curves in `training_history.json`
+4. Visualize segmentation predictions
 
-This contains:
+Possible improvements:
 
-* Trained model
-* Processed dataset
-* Training logs
-* Metadata
-
----
-
-# Future Improvements
-
-Possible extensions:
-
-* Multi-class segmentation
 * Attention U-Net
+* Multi-class segmentation
 * Mixed precision training
 * GPU optimization
-* Model inference pipeline
 * Deployment API
 
 ---
 
 # License
 
-This project is open-source and available under the **MIT License**.
+This project is released under the **MIT License**.
 
 ---
 
 # Author
 
-Developed for **Construction Site Segmentation using Deep Learning**.
-
-If you find this project useful, consider giving it a ⭐ on GitHub.
+Developed for **Construction Site Segmentation using Deep Learning and U-Net**.

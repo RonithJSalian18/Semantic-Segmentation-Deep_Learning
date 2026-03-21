@@ -25,4 +25,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Default command to run training script
-CMD ["python", "server_notebook.py"]
+CMD ["python", "main.py"]

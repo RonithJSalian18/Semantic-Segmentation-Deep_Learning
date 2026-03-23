@@ -27,4 +27,4 @@ RUN pip install --no-cache-dir \
 RUN mkdir -p segmentation_results
 
 # Run script
-CMD ["python", "server_notebook.py"]
+CMD ["python", "main.py"]

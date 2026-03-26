@@ -1,0 +1,5 @@
+data.zip
+segmentation_results/
+tf-gpu/
+venv/
+.venv/

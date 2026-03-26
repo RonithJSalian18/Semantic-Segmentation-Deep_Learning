@@ -1,16 +1,10 @@
 """
 SERVER TRAINING NOTEBOOK - SINGLE ZIP INPUT
-Construction Site Segmentation
-
-ZIP STRUCTURE REQUIRED:
-data.zip
- └── input/
-     ├── original_images/
-     └── masked_images/
+Construction Site Segmentation (CUDA ENABLED)
 """
 
 # ============================================================================
-# CELL 1: Imports
+# CELL 1: Imports + GPU SETUP
 # ============================================================================
 
 import os, sys, cv2, json, zipfile, tempfile, warnings
@@ -19,9 +13,32 @@ from pathlib import Path
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 import albumentations as A
+import tensorflow as tf
 
 warnings.filterwarnings('ignore')
+
 print("✓ Libraries imported")
+
+# ================= GPU / CUDA CHECK =================
+print("\n🔍 Checking GPU...")
+
+gpus = tf.config.list_physical_devices('GPU')
+
+if gpus:
+    print(f"✅ GPU Found: {gpus}")
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        print("✅ Memory growth enabled")
+    except RuntimeError as e:
+        print(e)
+else:
+    print("❌ No GPU found, using CPU")
+
+print("Num GPUs Available:", len(gpus))
+print("Device Name:", tf.test.gpu_device_name())
+# ===================================================
+
 
 # ============================================================================
 # CELL 2: CONFIG
@@ -37,6 +54,7 @@ if not os.path.exists(DATA_ZIP):
     sys.exit(1)
 
 print(f"✓ Using ZIP: {os.path.abspath(DATA_ZIP)}")
+
 
 # ============================================================================
 # CELL 3: PREPROCESSOR
@@ -117,6 +135,7 @@ class ServerDatasetPreprocessor:
 
         print("✓ Dataset processed")
 
+
 # ============================================================================
 # CELL 4: DATALOADER
 # ============================================================================
@@ -132,28 +151,28 @@ class DataLoader:
         files = sorted((self.dataset_dir/split/'images').glob("*.npy"))
 
         def load(x):
-          x = x.numpy().decode("utf-8")   # 🔥 convert tensor → string
-
-          img = np.load(x)
-          mask = np.load(x.replace("images", "masks"))
-
-          return img.astype(np.float32), mask.astype(np.float32)
+            x = x.numpy().decode("utf-8")
+            img = np.load(x)
+            mask = np.load(x.replace("images", "masks"))
+            return img.astype(np.float32), mask.astype(np.float32)
 
         ds = tf.data.Dataset.from_tensor_slices([str(f) for f in files])
         ds = ds.map(lambda x: tf.py_function(load,[x],[tf.float32,tf.float32]))
+
         def _fix_shape(img, mask):
-          img.set_shape((512, 512, 3))
-          mask.set_shape((512, 512))
-          return img, mask
+            img.set_shape((512, 512, 3))
+            mask.set_shape((512, 512))
+            return img, mask
+
         ds = ds.map(_fix_shape)
         ds = ds.batch(self.batch_size).prefetch(tf.data.AUTOTUNE)
         return ds
+
 
 # ============================================================================
 # CELL 5: MODEL
 # ============================================================================
 
-import tensorflow as tf
 from tensorflow.keras import layers, models
 
 def conv_block(x,f):
@@ -187,12 +206,14 @@ def build_unet():
 
     return models.Model(inputs,outputs)
 
+
 # ============================================================================
 # CELL 6: RUN PREPROCESSING
 # ============================================================================
 
 preprocessor = ServerDatasetPreprocessor(DATA_ZIP, OUTPUT_DIR)
 preprocessor.process_dataset()
+
 
 # ============================================================================
 # CELL 7: LOAD DATA
@@ -204,14 +225,21 @@ train_ds = loader.create_tf_dataset('train')
 val_ds = loader.create_tf_dataset('val')
 test_ds = loader.create_tf_dataset('test')
 
+
 # ============================================================================
-# CELL 8: TRAIN
+# CELL 8: TRAIN (GPU FORCED)
 # ============================================================================
 
-model = build_unet()
-model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+device = '/GPU:0' if tf.config.list_physical_devices('GPU') else '/CPU:0'
 
-model.fit(train_ds, validation_data=val_ds, epochs=20)
+with tf.device(device):
+    print(f"\n🚀 Training on {device}")
+
+    model = build_unet()
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+
+    model.fit(train_ds, validation_data=val_ds, epochs=20)
+
 
 # ============================================================================
 # CELL 9: EVALUATE + SAVE

@@ -2,3 +2,7 @@ data.zip
 segmentation_results/
 tf-env/
 .venv/
+models/
+predictions/
+processed/
+test.py

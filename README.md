@@ -1,387 +1,251 @@
-# Construction Site Segmentation (U-Net)
+# Multi-Class Image Segmentation using U-Net (Drone Dataset)
 
-A deep learning pipeline for **semantic segmentation of construction sites from aerial images** using a **U-Net architecture implemented in TensorFlow**.
+## Overview
 
-The project includes:
+This project implements a **multi-class semantic segmentation pipeline** using a U-Net architecture in TensorFlow.
+It is designed for drone imagery and supports segmentation into multiple classes such as:
 
-* Dataset preprocessing from ZIP files
-* Image–mask validation
-* Data augmentation
-* Automatic dataset splitting
-* U-Net training pipeline
-* Model evaluation
-* Saving trained model and logs
+- Background
+- Water
+- Vegetation
+- Structure (buildings)
 
-This script is designed to run on a **local machine, research server, or Docker container**.
+The pipeline includes:
 
----
-
-# Project Workflow
-
-The training pipeline performs the following steps:
-
-1. Load dataset ZIP files
-2. Extract images and masks
-3. Match image–mask pairs
-4. Validate dataset
-5. Normalize images and masks
-6. Resize images to **512 × 512**
-7. Apply data augmentation
-8. Split dataset into:
-
-   * Train
-   * Validation
-   * Test
-9. Train a **U-Net segmentation model**
-10. Evaluate model performance
-11. Save model and training history
+- Data preprocessing (RGB masks → label masks)
+- Augmentation using Albumentations
+- Custom Dice + CrossEntropy loss
+- Mean IoU evaluation metric
+- Training visualization (loss, accuracy, IoU)
+- Prediction on new images using a separate script
 
 ---
 
-# Project Structure
+## Project Structure
 
-Example repository structure:
-
-```
-construction-site-segmentation/
-│
-├── server_notebook.py
-├── README.md
-├── requirements.txt
-│
-├── data/
-│   └── input/
-│       ├── original_images.zip
-│       └── mask_images.zip
-│
-└── segmentation_results/
-    ├── train/
-    ├── val/
-    ├── test/
-    ├── metadata/
-    ├── logs/
-    └── models/
+```id="gi40e9"
+├── main.py              # Training pipeline
+├── predict.py           # Inference script
+├── data.zip             # Dataset (images + masks)
+├── processed/           # Preprocessed dataset (auto-generated)
+├── predictions/         # Output predictions
+├── final_model.h5       # Saved trained model
+└── README.md
 ```
 
 ---
 
-# Dataset Format
+## GPU Setup (CUDA + cuDNN)
 
-The project expects **two ZIP files**:
+To use GPU acceleration, you need to install:
 
-### Original Images
+- NVIDIA GPU drivers
+- CUDA Toolkit
+- cuDNN (CUDA Deep Neural Network library)
 
-```
-original_images.zip
-```
+### 1. Check GPU
 
-Contains aerial RGB images.
+Run:
 
-### Mask Images
-
-```
-mask_images.zip
+```id="xt7i92"
+nvidia-smi
 ```
 
-Contains segmentation masks.
-
-Important requirement:
-
-Each mask must have **the same filename as its corresponding image**.
-
-Example:
-
-```
-image001.png
-image001.png (mask)
-```
-
-Supported formats:
-
-* `.png`
-* `.jpg`
-* `.jpeg`
+If your GPU is listed, proceed.
 
 ---
 
-# Installation
+### 2. Install CUDA
 
-Clone the repository:
+Download CUDA Toolkit from:
+https://developer.nvidia.com/cuda-downloads
 
+Install a version compatible with your TensorFlow version.
+
+---
+
+### 3. Install cuDNN
+
+Download cuDNN from:
+https://developer.nvidia.com/cudnn
+
+Steps:
+
+1. Extract the cuDNN folder
+2. Copy contents into CUDA directory:
+
+```id="298eti"
+bin → C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\vXX.X\bin
+lib → ...\lib
+include → ...\include
 ```
-git clone https://github.com/yourusername/construction-site-segmentation.git
-cd construction-site-segmentation
+
+---
+
+### 4. Set Environment Variables
+
+Add CUDA paths to system environment variables:
+
+```id="q8bh7o"
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\vXX.X\bin
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\vXX.X\libnvvp
 ```
+
+---
+
+### 5. Verify TensorFlow GPU
+
+Run Python:
+
+```python id="1f8cyq"
+import tensorflow as tf
+print(tf.config.list_physical_devices('GPU'))
+```
+
+If GPU appears → setup is correct.
+
+---
+
+## Virtual Environment Setup
+
+Create and activate a virtual environment:
+
+### Windows
+
+```id="v5odfj"
+python -m venv .venv
+.venv\Scripts\activate
+```
+
+### Linux / Mac
+
+```id="ooopzd"
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+---
+
+## Install Requirements
 
 Install dependencies:
 
-```
+```id="da8lb2"
 pip install -r requirements.txt
 ```
 
----
+If you don’t have a requirements file, install manually:
 
-# Required Libraries
-
-Main dependencies:
-
-* TensorFlow
-* NumPy
-* OpenCV
-* Albumentations
-* Scikit-learn
-* tqdm
-* Pillow
-
-Example `requirements.txt`:
-
-```
-tensorflow
-numpy
-opencv-python
-albumentations
-scikit-learn
-tqdm
-pillow
+```id="yaiq7u"
+pip install tensorflow opencv-python numpy matplotlib albumentations scikit-learn seaborn
 ```
 
 ---
 
-# Running the Training Pipeline
+## Dataset Format
 
-Place dataset ZIP files in:
+Your dataset should be structured inside `data.zip`:
 
+```id="plalnn"
+input/
+   ├── original_images/
+   │      img1.jpg
+   │      img2.jpg
+   ├── masked_images/
+          img1.jpg
+          img2.jpg
 ```
-data/input/
+
+- Each mask is a **color-coded segmentation image**
+- Colors are mapped to class labels during preprocessing
+
+---
+
+## Training the Model
+
+Run:
+
+```id="vjw66v"
+python main.py
 ```
 
-Then run:
+This will:
 
-```
-python server_notebook.py
+- Extract dataset
+- Preprocess images and masks
+- Train the U-Net model
+- Save model as `final_model.h5`
+- Display training graphs (loss, accuracy, IoU)
+
+---
+
+## Metrics
+
+The model reports:
+
+- Accuracy (pixel-wise)
+- Mean IoU (Intersection over Union)
+
+---
+
+## Prediction (predict.py)
+
+This script performs inference on new images.
+
+### Input Options
+
+You can use:
+
+- A single image
+- A folder of images
+
+Modify in `predict.py`:
+
+```id="rbqbeh"
+INPUT_PATH = "test_images"
 ```
 
 ---
 
-# Data Preprocessing
+### Run Prediction
 
-The script automatically performs:
-
-### Dataset Extraction
-
-ZIP files are extracted into temporary directories.
-
-### Pair Matching
-
-Images and masks are matched using their filenames.
-
-### Image Normalization
-
-Images are scaled to:
-
-```
-[0,1]
-```
-
-### Mask Normalization
-
-Masks are converted to **binary values**:
-
-```
-0 → background
-1 → construction site
-```
-
-### Resizing
-
-All images are resized to:
-
-```
-512 × 512
-```
-
-### Data Augmentation
-
-The following augmentations are applied:
-
-* Horizontal Flip
-* Vertical Flip
-* Rotation
-* Perspective Transform
-* Gaussian Noise
-* Color Jitter
-* Random Rain
-* Random Fog
-* Gaussian Blur
-* Coarse Dropout
-
----
-
-# Dataset Splitting
-
-Default dataset split:
-
-| Split      | Percentage |
-| ---------- | ---------- |
-| Train      | 75%        |
-| Validation | 15%        |
-| Test       | 10%        |
-
----
-
-# Model Architecture
-
-The project uses a **U-Net convolutional neural network** for semantic segmentation.
-
-Architecture components:
-
-Encoder
-
-* Convolution blocks
-* Batch normalization
-* Max pooling
-
-Bottleneck
-
-* Deep convolution layers
-
-Decoder
-
-* Transposed convolution
-* Skip connections
-
-Output layer
-
-* Sigmoid activation
-
-Input shape:
-
-```
-512 × 512 × 3
+```id="p0ve8p"
+python predict.py
 ```
 
 ---
 
-# Training Configuration
+### Output
 
-Default training parameters:
+Predictions are saved in:
 
-| Parameter     | Value               |
-| ------------- | ------------------- |
-| Epochs        | 50                  |
-| Batch Size    | 32                  |
-| Optimizer     | Adam                |
-| Learning Rate | 0.001               |
-| Loss Function | Binary Crossentropy |
+```id="w1dlt2"
+predictions/
+   image1_mask.png
+   image2_mask.png
+```
 
-Metrics used:
+Each output includes:
 
-* Accuracy
-* Intersection over Union (IoU)
-* Precision
-* Recall
-
-Training also uses:
-
-* EarlyStopping
-* ReduceLROnPlateau
+- Segmented mask (colored)
+- Optional visualization (original + prediction)
 
 ---
 
-# Output
+## Class Mapping
 
-After training, results are saved in:
-
-```
-segmentation_results/
-```
-
-Directory contents:
-
-### Processed Dataset
-
-```
-train/
-val/
-test/
-```
-
-### Model
-
-```
-models/construction_site_segmentation.h5
-```
-
-### Training Logs
-
-```
-logs/training_history.json
-```
-
-### Dataset Metadata
-
-```
-metadata/dataset_info.json
-```
+| Label | Class      | Color (RGB)   |
+| ----- | ---------- | ------------- |
+| 0     | Background | (169,169,169) |
+| 1     | Water      | (14,135,204)  |
+| 2     | Vegetation | (124,252,0)   |
+| 3     | Structure  | (155,38,182)  |
 
 ---
 
-# Example Training Output
+## Future Improvements
 
-```
-Loss:      0.2453
-Accuracy:  0.9124
-IoU:       0.7321
-Precision: 0.8845
-Recall:    0.8612
-```
-
----
-
-# Using Docker (Optional)
-
-Build the Docker image:
-
-```
-docker build -t segmentation-training .
-```
-
-Run container:
-
-```
-docker run \
--v /server/data:/app/data/input \
--v /server/output:/app/segmentation_results \
-segmentation-training
-```
-
----
-
-# Next Steps
-
-After training:
-
-1. Download the `segmentation_results` folder
-2. Use the trained model for inference
-3. Analyze training curves in `training_history.json`
-4. Visualize segmentation predictions
-
-Possible improvements:
-
-* Attention U-Net
-* Multi-class segmentation
-* Mixed precision training
-* GPU optimization
-* Deployment API
-
----
-
-# License
-
-This project is released under the **MIT License**.
-
----
-
-# Author
-
-Developed for **Construction Site Segmentation using Deep Learning and U-Net**.
+- Replace U-Net with DeepLabV3+
+- Add class-wise weighting
+- Real-time segmentation (video/webcam)
+- Better class separation (e.g., road vs background)

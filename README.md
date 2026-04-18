@@ -20,6 +20,9 @@ The pipeline includes:
 - Prediction on new images using a separate script
 
 ---
+## Dataset Download Link
+
+https://drive.google.com/uc?id=1b88NGOW-7EgNQ1LLI0UHXE-KLOzaqnGm
 
 ## Project Structure
 
